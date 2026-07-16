@@ -8,6 +8,9 @@
 
 set(OV_ONNX_NAMESPACE openvino_onnx)
 
+ov_apply_patch(
+    PATCH "${CMAKE_SOURCE_DIR}/cmake/patches/onnx/not_equal_to_ctad.patch")
+
 if(NOT DEFINED ONNX_USE_MSVC_STATIC_RUNTIME)
     set(ONNX_USE_MSVC_STATIC_RUNTIME OFF)
 endif()
