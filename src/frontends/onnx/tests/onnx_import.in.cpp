@@ -32,11 +32,13 @@
 #include "conversion_extension.hpp"
 #include "gtest/gtest.h"
 #include "onnx_utils.hpp"
+#include "openvino/core/preprocess/pre_post_process.hpp"
 #include "openvino/op/constant.hpp"
 #include "openvino/op/prelu.hpp"
 #include "openvino/op/reshape.hpp"
 #include "openvino/op/scatter_elements_update.hpp"
 #include "openvino/op/softmax.hpp"
+#include "openvino/op/swish.hpp"
 #include "openvino/pass/constant_folding.hpp"
 
 using namespace ov;
@@ -9622,6 +9624,132 @@ OPENVINO_TEST(${BACKEND_NAME}, onnx_model_swish_opset24_beta_input) {
     auto test_case = ov::test::TestCase(model, s_device);
     test_case.add_input<float>(Shape{3}, {-0.5f, 0.0f, 0.5f});
     test_case.add_expected_output<float>(Shape{3}, {-0.2036667f, 0.0f, 0.2963333f});
+
+    test_case.run_with_tolerance_as_fp(2.0e-5f);
+}
+
+namespace {
+// Inputs of the ONNX backend tests test_swiglu*: Y = A * Sigmoid(alpha * A) * B
+const std::vector<float> swiglu_a{1.0f, -2.0f, 3.0f, 4.0f, -1.0f, 2.0f, -3.0f, 0.5f};
+const std::vector<float> swiglu_b{0.5f, 1.0f, -1.0f, 2.0f, 2.0f, -1.0f, 0.5f, 1.0f};
+const std::vector<float>
+    swiglu_expected{0.365529f, -0.238406f, -2.857722f, 7.856110f, -0.537883f, -1.761594f, -0.071139f, 0.311230f};
+const std::vector<float>
+    swiglu_alpha_expected{0.311230f, -0.537883f, -2.452723f, 7.046377f, -0.755081f, -1.462117f, -0.273638f, 0.281088f};
+
+// Reads the output back as f32 because the tolerance-based comparison supports only f32 and f16.
+std::shared_ptr<ov::Model> swiglu_with_f32_output(std::shared_ptr<ov::Model> model) {
+    ov::preprocess::PrePostProcessor ppp(model);
+    ppp.output("Y").tensor().set_element_type(ov::element::f32);
+    return ppp.build();
+}
+}  // namespace
+
+OPENVINO_TEST(${BACKEND_NAME}, onnx_model_swiglu) {
+    auto model = convert_model("swiglu.onnx");
+
+    auto test_case = ov::test::TestCase(model, s_device);
+    test_case.add_input<float>(Shape{2, 4}, swiglu_a);
+    test_case.add_input<float>(Shape{2, 4}, swiglu_b);
+    test_case.add_expected_output<float>(Shape{2, 4}, swiglu_expected);
+
+    test_case.run_with_tolerance_as_fp(2.0e-5f);
+}
+
+OPENVINO_TEST(${BACKEND_NAME}, onnx_model_swiglu_alpha) {
+    auto model = convert_model("swiglu_alpha.onnx");
+
+    auto test_case = ov::test::TestCase(model, s_device);
+    test_case.add_input<float>(Shape{2, 4}, swiglu_a);
+    test_case.add_input<float>(Shape{2, 4}, swiglu_b);
+    test_case.add_expected_output<float>(Shape{2, 4}, swiglu_alpha_expected);
+
+    test_case.run_with_tolerance_as_fp(2.0e-5f);
+}
+
+OPENVINO_TEST(${BACKEND_NAME}, onnx_model_swiglu_float16) {
+    auto model = convert_model("swiglu_float16.onnx");
+
+    auto test_case = ov::test::TestCase(model, s_device);
+    test_case.add_input<ov::float16>(Shape{2, 4}, std::vector<ov::float16>(swiglu_a.begin(), swiglu_a.end()));
+    test_case.add_input<ov::float16>(Shape{2, 4}, std::vector<ov::float16>(swiglu_b.begin(), swiglu_b.end()));
+    test_case.add_expected_output<ov::float16>(
+        Shape{2, 4},
+        std::vector<ov::float16>(swiglu_expected.begin(), swiglu_expected.end()));
+
+    test_case.run_with_tolerance_as_fp(1.0e-2f);
+}
+
+OPENVINO_TEST(${BACKEND_NAME}, onnx_model_swiglu_bfloat16_alpha) {
+    auto model = swiglu_with_f32_output(convert_model("swiglu_bfloat16_alpha.onnx"));
+
+    auto test_case = ov::test::TestCase(model, s_device);
+    test_case.add_input<ov::bfloat16>(Shape{2, 4}, std::vector<ov::bfloat16>(swiglu_a.begin(), swiglu_a.end()));
+    test_case.add_input<ov::bfloat16>(Shape{2, 4}, std::vector<ov::bfloat16>(swiglu_b.begin(), swiglu_b.end()));
+    test_case.add_expected_output<float>(Shape{2, 4}, swiglu_alpha_expected);
+
+    test_case.run_with_tolerance_as_fp(5.0e-2f);
+}
+
+OPENVINO_TEST(${BACKEND_NAME}, onnx_model_swiglu_double_alpha) {
+    auto model = swiglu_with_f32_output(convert_model("swiglu_double_alpha.onnx"));
+
+    auto test_case = ov::test::TestCase(model, s_device);
+    test_case.add_input<double>(Shape{2, 4}, std::vector<double>(swiglu_a.begin(), swiglu_a.end()));
+    test_case.add_input<double>(Shape{2, 4}, std::vector<double>(swiglu_b.begin(), swiglu_b.end()));
+    test_case.add_expected_output<float>(Shape{2, 4}, swiglu_alpha_expected);
+
+    test_case.run_with_tolerance_as_fp(2.0e-5f);
+}
+
+OPENVINO_TEST(${BACKEND_NAME}, onnx_model_swiglu_dynamic) {
+    auto model = convert_model("swiglu_dynamic.onnx");
+
+    auto test_case = ov::test::TestCase(model, s_device);
+    test_case.add_input<float>(Shape{2, 4}, swiglu_a);
+    test_case.add_input<float>(Shape{2, 4}, swiglu_b);
+    test_case.add_expected_output<float>(Shape{2, 4}, swiglu_expected);
+
+    test_case.run_with_tolerance_as_fp(2.0e-5f);
+}
+
+OPENVINO_TEST(${BACKEND_NAME}, onnx_model_swiglu_shape_mismatch) {
+    OV_EXPECT_THROW_HAS_SUBSTRING(convert_model("swiglu_shape_mismatch.onnx"),
+                                  ov::Exception,
+                                  "SwiGLU expects inputs A and B to have identical shapes");
+}
+
+// Default alpha must produce a single-input Swish, the form matched by GLUFusion and MoE fusions.
+OPENVINO_TEST(${BACKEND_NAME}, onnx_model_swiglu_swish_inputs) {
+    const auto swish_input_count = [](const std::shared_ptr<ov::Model>& model) {
+        for (const auto& op : model->get_ops()) {
+            if (ov::is_type<ov::op::v4::Swish>(op)) {
+                return op->get_input_size();
+            }
+        }
+        return size_t{0};
+    };
+    EXPECT_EQ(swish_input_count(convert_model("swiglu.onnx")), 1u);
+    EXPECT_EQ(swish_input_count(convert_model("swiglu_alpha.onnx")), 2u);
+}
+
+OPENVINO_TEST(${BACKEND_NAME}, onnx_model_swiglu_alpha_dynamic_type) {
+    ov::frontend::FrontEnd::Ptr front_end;
+    auto input_model = load_model("swiglu_alpha.onnx", &front_end);
+    input_model->set_element_type(input_model->get_place_by_tensor_name("A"), ov::element::dynamic);
+    input_model->set_element_type(input_model->get_place_by_tensor_name("B"), ov::element::dynamic);
+    const auto model = front_end->convert(input_model);
+    ASSERT_EQ(model->output(0).get_element_type(), ov::element::dynamic);
+
+    for (const auto& parameter : model->get_parameters()) {
+        parameter->set_element_type(ov::element::f32);
+    }
+    model->validate_nodes_and_infer_types();
+
+    auto test_case = ov::test::TestCase(model, s_device);
+    test_case.add_input<float>(Shape{2, 4}, swiglu_a);
+    test_case.add_input<float>(Shape{2, 4}, swiglu_b);
+    test_case.add_expected_output<float>(Shape{2, 4}, swiglu_alpha_expected);
 
     test_case.run_with_tolerance_as_fp(2.0e-5f);
 }
